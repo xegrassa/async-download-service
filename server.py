@@ -31,12 +31,6 @@ async def uptime_handler(request):
         await asyncio.sleep(args.delay)
 
 
-def write_to_file(data, name='EgrassaZip'):
-    file_path = os.path.join(os.getcwd(), name)
-    with open(file_path, 'ab') as f:
-        f.write(data)
-
-
 async def archivate(request):
     hash = request.match_info.get('archive_hash')
     file_path = os.path.join(args.directory, hash)
