@@ -9,14 +9,10 @@ from dotenv import load_dotenv
 from fotoserver.cli import parse_arguments
 from fotoserver.logging import configure_logging
 
-load_dotenv()
-args = parse_arguments()
-logger = configure_logging(args.no_logging)
-
 
 async def uptime_handler(request):
+    delay = request.app['delay']
     response = web.StreamResponse()
-
     # Большинство браузеров не отрисовывают частично загруженный контент, только если это не HTML.
     # Поэтому отправляем клиенту именно HTML, указываем это в Content-Type.
     response.headers['Content-Type'] = 'text/html'
@@ -28,12 +24,14 @@ async def uptime_handler(request):
         message = f'{formatted_date}<br>'  # <br> — HTML тег переноса строки
         # Отправляет клиенту очередную порцию ответа
         await response.write(message.encode('utf-8'))
-        await asyncio.sleep(args.delay)
+        await asyncio.sleep(delay)
 
 
 async def archivate(request):
-    hash = request.match_info.get('archive_hash')
-    file_path = os.path.join(args.directory, hash)
+    directory = request.app['directory']
+    delay = request.app['delay']
+    hash = request.match_info['archive_hash']
+    file_path = os.path.join(directory, hash)
     if not os.path.exists(file_path):
         raise web.HTTPNotFound(reason='Архив не существует или был удален')
 
@@ -44,7 +42,7 @@ async def archivate(request):
     await response.prepare(request)
 
     program = 'zip'
-    params = ('-jqr', '-', f'{file_path}')
+    params = ('-qr', '-', f'{file_path}')
     process = await asyncio.create_subprocess_exec(program, *params, stdout=asyncio.subprocess.PIPE)
 
     try:
@@ -52,7 +50,7 @@ async def archivate(request):
             logger.debug(f'Sending archive chunk {hash}')
             chunk = await process.stdout.read(500000)  # 500Kb
             await response.write(chunk)
-            await asyncio.sleep(args.delay)
+            await asyncio.sleep(delay)
     except (asyncio.CancelledError, BaseException):
         logger.debug(f'Download was interrupted {hash}')
         process.terminate()
@@ -68,7 +66,14 @@ async def handle_index_page(request):
 
 
 if __name__ == '__main__':
+    load_dotenv()
+    default_directory = os.getenv('DIRECTORY')
+    args = parse_arguments()
+    logger = configure_logging(args.no_logging)
+
     app = web.Application()
+    app['delay'] = args.delay
+    app['directory'] = args.directory if args.directory else default_directory
     app.add_routes([
         web.get('/', handle_index_page),
         web.get('/archive/{archive_hash}/', archivate),
